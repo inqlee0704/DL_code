@@ -6,6 +6,7 @@
 # Engines:
 #  - Classifier: Classification
 #  - Segmentor: Semantic Segmentation
+#  - Segmentor3D: 3D Semantic Segmentation
 #  - Detector: Object Detection (Need to be updated)
 # ##############################################################################
 # How to use:
@@ -141,6 +142,122 @@ class Segmentor:
                     epoch_dice += dice
                 pbar.set_description(f'loss:{loss:.2f}, dice:{dice:.4f}') 
             return epoch_loss/iters, epoch_dice/(iters-skip)
+
+# class Segmentor3D:
+#     def __init__(self,model,optimizer,scheduler,loss_fn,device):
+#         self.model = model
+#         self.optimizer = optimizer
+#         self.scheduler = scheduler
+#         self.loss_fn = loss_fn
+#         self.device = device
+#         self.epoch = 0
+
+#     def train(self, data_loader):
+#         self.model.train()
+#         epoch_loss = 0
+#         epoch_dice = 0
+#         iters = len(data_loader)
+#         pbar = tqdm(enumerate(data_loader), total=iters)
+#         for step, batch in pbar:
+#             self.optimizer.zero_grad()
+#             inputs = batch['image'].to(self.device,dtype=torch.float)
+#             targets = batch['seg'].to(self.device,dtype=torch.int64)
+#             outputs = self.model(inputs)
+#             loss = self.loss_fn(outputs, targets[:, 0, :, :,:])
+#             preds = np.argmax(outputs.cpu().detach().numpy(),axis=1)
+#             targets = targets.cpu().detach().numpy()
+#             targets = np.squeeze(targets,axis=1)
+#             dice = Dice3d(preds[0,:,:,:],targets[0,:,:,:])
+#             loss.backward()
+#             self.optimizer.step()
+#             self.scheduler.step(self.epoch+step/iters)
+#             epoch_loss += loss.item()
+#             epoch_dice += dice
+#             pbar.set_description(f'loss:{loss:.2f}, dice:{dice:.4f}') 
+#         return epoch_loss/iters, epoch_dice/iters
+
+#     def evaluate(self, data_loader):
+#         self.model.eval()
+#         epoch_loss = 0
+#         epoch_dice = 0
+#         skip = 0
+#         iters = len(data_loader)
+#         pbar = tqdm(enumerate(data_loader),total=iters)
+#         with torch.no_grad():
+#             for step, batch in pbar:
+#                 inputs = batch['image'].to(self.device,dtype=torch.float)
+#                 outputs = self.model(inputs)
+#                 targets = batch['seg'].to(self.device,dtype=torch.int64)
+#                 loss = self.loss_fn(outputs, targets[:, 0, :, :,:])
+#                 epoch_loss += loss.item()
+#                 preds = np.argmax(outputs.cpu().detach().numpy(),axis=1)
+#                 targets = targets.cpu().detach().numpy()
+#                 targets = np.squeeze(targets,axis=1)
+#                 dice = Dice3d(preds[0,:,:,:],targets[0,:,:,:])
+#                 epoch_dice += dice
+
+#                 pbar.set_description(f'loss:{loss:.2f}, dice:{dice:.4f}') 
+#             return epoch_loss/iters, epoch_dice/iters
+
+class Segmentor3D:
+    def __init__(self,model,optimizer,scheduler,loss_fn,device,scaler):
+        self.model = model
+        self.optimizer = optimizer
+        self.scheduler = scheduler
+        self.loss_fn = loss_fn
+        self.device = device
+        self.epoch = 0
+        self.scaler = scaler
+
+    def train(self, data_loader):
+        self.model.train()
+        epoch_loss = 0
+        epoch_dice = 0
+        iters = len(data_loader)
+        pbar = tqdm(enumerate(data_loader), total=iters)
+        for step, batch in pbar:
+            self.optimizer.zero_grad()
+            inputs = batch['image'].to(self.device,dtype=torch.float)
+            targets = batch['seg'].to(self.device,dtype=torch.int64)
+
+            with amp.autocast():
+                outputs = self.model(inputs)
+                loss = self.loss_fn(outputs, targets[:, 0, :, :,:])
+            preds = np.argmax(outputs.cpu().detach().numpy(),axis=1)
+            targets = targets.cpu().detach().numpy()
+            targets = np.squeeze(targets,axis=1)
+            dice = Dice3d(preds[0,:,:,:],targets[0,:,:,:])
+            self.scaler.scale(loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+            self.scheduler.step(self.epoch+step/iters)
+            epoch_loss += loss.item()
+            epoch_dice += dice
+            pbar.set_description(f'loss:{loss:.4f}, dice:{dice:.4f}') 
+        return epoch_loss/iters, epoch_dice/iters
+
+    def evaluate(self, data_loader):
+        self.model.eval()
+        epoch_loss = 0
+        epoch_dice = 0
+        iters = len(data_loader)
+        pbar = tqdm(enumerate(data_loader),total=iters)
+        with torch.no_grad():
+            for step, batch in pbar:
+                inputs = batch['image'].to(self.device,dtype=torch.float)
+                outputs = self.model(inputs)
+                targets = batch['seg'].to(self.device,dtype=torch.int64)
+                loss = self.loss_fn(outputs, targets[:, 0, :, :,:])
+                epoch_loss += loss.item()
+                preds = np.argmax(outputs.cpu().detach().numpy(),axis=1)
+                targets = targets.cpu().detach().numpy()
+                targets = np.squeeze(targets,axis=1)
+                dice = Dice3d(preds[0,:,:,:],targets[0,:,:,:])
+                epoch_dice += dice
+
+                pbar.set_description(f'loss:{loss:.4f}, dice:{dice:.4f}') 
+            return epoch_loss/iters, epoch_dice/iters
+ 
  
 
 class Detector:
