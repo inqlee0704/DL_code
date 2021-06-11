@@ -175,6 +175,10 @@ class UNet(nn.Module):
 # Defines the Unet.
 # |num_downs|: number of downsamplings in UNet. For example,
 # if |num_downs| == 7, image of size 128x128 will become of size 1x1 at the bottleneck
+# Copyright 2017 Division of Medical Image Computing, German Cancer Research Center (DKFZ)
+# Defines the Unet.
+# |num_downs|: number of downsamplings in UNet. For example,
+# if |num_downs| == 7, image of size 128x128 will become of size 1x1 at the bottleneck
 class RecursiveUNet(nn.Module):
     def __init__(self,
                 num_classes=2,
@@ -182,7 +186,8 @@ class RecursiveUNet(nn.Module):
                 initial_filter_size=64,
                 kernel_size=3,
                 num_downs=4,
-                norm_layer=nn.InstanceNorm2d):
+                norm_layer=nn.InstanceNorm2d,
+                activation=nn.LeakyReLU(inplace=True)):
 #       InstancNorm performs better than BatchNorm for airway segmentation
         super(RecursiveUNet, self).__init__()
         unet_block = UnetSkipConnectionBlock(in_channels=initial_filter_size * 2 ** (num_downs-1),
@@ -190,14 +195,16 @@ class RecursiveUNet(nn.Module):
                                              num_classes=num_classes,
                                              kernel_size=kernel_size,
                                              norm_layer=norm_layer,
-                                             innermost=True)
+                                             innermost=True,
+                                             activation=activation)
         for i in range(1, num_downs):
             unet_block = UnetSkipConnectionBlock(in_channels=initial_filter_size * 2 ** (num_downs-(i+1)),
                                                  out_channels=initial_filter_size * 2 ** (num_downs-i),
                                                  num_classes=num_classes,
                                                  kernel_size=kernel_size,
                                                  submodule=unet_block,
-                                                 norm_layer=norm_layer)
+                                                 norm_layer=norm_layer,
+                                                 activation=activation)
 
         unet_block = UnetSkipConnectionBlock(in_channels=in_channels,
                                              out_channels=initial_filter_size,
@@ -205,7 +212,8 @@ class RecursiveUNet(nn.Module):
                                              kernel_size=kernel_size,
                                              submodule=unet_block,
                                              norm_layer=norm_layer,
-                                             outermost=True)
+                                             outermost=True,
+                                             activation=activation)
 
         self.model = unet_block
 
@@ -226,7 +234,8 @@ class UnetSkipConnectionBlock(nn.Module):
                  outermost=False,
                  innermost=False,
                  norm_layer=nn.InstanceNorm2d,
-                 use_dropout=False):
+                 use_dropout=False,
+                 activation=nn.LeakyReLU(inplace=True)):
 
         super(UnetSkipConnectionBlock, self).__init__()
         self.outermost = outermost
@@ -235,19 +244,23 @@ class UnetSkipConnectionBlock(nn.Module):
         conv1 = self.contract(in_channels=in_channels,
                               out_channels=out_channels,
                               kernel_size=kernel_size,
-                              norm_layer=norm_layer)
+                              norm_layer=norm_layer,
+                              activation=activation)
         conv2 = self.contract(in_channels=out_channels,
                               out_channels=out_channels,
                               kernel_size=kernel_size,
-                              norm_layer=norm_layer)
+                              norm_layer=norm_layer,
+                              activation=activation)
 
         # upconv
         conv3 = self.expand(in_channels=out_channels*2,
                             out_channels=out_channels,
-                            kernel_size=kernel_size)
+                            kernel_size=kernel_size,
+                            activation=activation)
         conv4 = self.expand(in_channels=out_channels,
                             out_channels=out_channels,
-                            kernel_size=kernel_size)
+                            kernel_size=kernel_size,
+                            activation=activation)
 
         if outermost:
             final = nn.Conv2d(out_channels, num_classes, kernel_size=1)
@@ -272,18 +285,18 @@ class UnetSkipConnectionBlock(nn.Module):
         self.model = nn.Sequential(*model)
 
     @staticmethod
-    def contract(in_channels, out_channels, kernel_size=3, norm_layer=nn.InstanceNorm2d):
+    def contract(in_channels, out_channels, kernel_size=3, norm_layer=nn.InstanceNorm2d,activation=nn.LeakyReLU(inplace=True)):
         layer = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size, padding=1),
             norm_layer(out_channels),
-            nn.LeakyReLU(inplace=True))
+            activation)
         return layer
 
     @staticmethod
-    def expand(in_channels, out_channels, kernel_size=3):
+    def expand(in_channels, out_channels, kernel_size=3, activation=nn.LeakyReLU(inplace=True)):
         layer = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size, padding=1),
-            nn.LeakyReLU(inplace=True),
+            activation,
         )
         return layer
 
